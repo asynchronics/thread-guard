@@ -14,18 +14,20 @@ use std::thread::{JoinHandle, Result as ThreadResult};
 /// before and after thread joining, respectively. The thread can also be
 /// explicitly joined using the `join` method. In this case, the pre-action is
 /// executed before the join, and the thread result is returned to the caller.
-pub struct ThreadGuard<T> {
-    drop_action: Option<Box<dyn FnOnce(bool) -> ThreadResult<T> + Send + 'static>>,
-}
+pub struct ThreadGuard<T>(
+    Option<(
+        JoinHandle<T>,
+        Box<dyn FnOnce(bool, JoinHandle<T>) -> ThreadResult<T> + Send>,
+    )>,
+);
 
-impl<T: 'static> ThreadGuard<T> {
+impl<T> ThreadGuard<T> {
     /// Creates a new `ThreadGuard`.
     pub fn new(handle: JoinHandle<T>) -> Self {
-        let drop_action = Box::new(move |_run_post_action| handle.join());
+        let action =
+            Box::new(move |_run_post_action, join_handle: JoinHandle<T>| join_handle.join());
 
-        Self {
-            drop_action: Some(drop_action),
-        }
+        Self(Some((handle, action)))
     }
 
     /// Creates a new `ThreadGuard` with the specified pre-action and
@@ -41,32 +43,36 @@ impl<T: 'static> ThreadGuard<T> {
         for<'a> F: FnOnce(&mut S, &JoinHandle<T>) + Send + 'a,
         for<'a> G: FnOnce(ThreadResult<T>) + Send + 'a,
     {
-        let drop_action = Box::new(move |run_post_action| {
-            pre_action(&mut pre_action_data, &handle);
-            let result = handle.join();
+        let action = Box::new(move |run_post_action, join_handle| {
+            pre_action(&mut pre_action_data, &join_handle);
+            let result = join_handle.join();
             if run_post_action {
                 post_action(result);
 
+                // This is a bit ugly. Another possibility would be for `action`
+                // to return an `Option<ThreadResult<T>>` but then we will have
+                // yet another infallible `unwrap`.
                 return Err(Box::new(()) as Box<dyn Any + Send>);
             }
 
             result
         });
 
-        Self {
-            drop_action: Some(drop_action),
-        }
+        Self(Some((handle, action)))
     }
 
     /// Joins the guarded thread.
     pub fn join(mut self) -> ThreadResult<T> {
-        self.drop_action.take().unwrap()(false)
+        let (handle, action) = self.0.take().unwrap();
+
+        action(false, handle)
     }
 }
 
 impl<T> Drop for ThreadGuard<T> {
     fn drop(&mut self) {
-        let _ = self.drop_action.take().unwrap()(true);
+        let (handle, action) = self.0.take().unwrap();
+        let _ = action(true, handle);
     }
 }
 
