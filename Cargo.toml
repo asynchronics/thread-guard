@@ -1,0 +1,22 @@
+[package]
+name = "thread-guard"
+authors = ["Asynchronics"]
+version = "0.1.0"
+edition = "2024"
+resolver = "3"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/asynchronics/thread-guard"
+description = """
+A simple thread guard.
+"""
+categories = ["concurrency"]
+keywords = [
+    "concurrency",
+    "thread",
+    "guard",
+]
+
+[dev-dependencies]
+mio = {version = "1", features = ["os-poll", "os-ext"] }
+mio-serial = "5"
+serialport = {version = "4.7", default-features = false}
