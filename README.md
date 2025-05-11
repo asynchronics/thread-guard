@@ -33,9 +33,8 @@ let guard = ThreadGuard::with_actions(
     thread::spawn(|| {
         1
     }),
-    (),
-    |_, _| {},
-    |r| {println!("The thread exited with the result {:?}", r)});
+    |_| {},
+    |_, r| {println!("The thread exited with the result {:?}", r)});
 ```
 
 If the thread needs to be signaled to exit, a pre-action can be used:
@@ -51,9 +50,8 @@ let guard = ThreadGuard::with_actions(
         rx.recv()?;
         Ok(())
     }),
-    (),
-    move |_, _| {let _ = tx.send(());},
-    |_| {});
+    move |_| {let _ = tx.send(());},
+    |_, _| {});
 ```
 
 Finally, a pre-action may need some data that outlives the appropriate

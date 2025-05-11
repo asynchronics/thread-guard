@@ -4,6 +4,7 @@
 
 use std::any::Any;
 use std::fmt;
+use std::mem;
 use std::thread::{JoinHandle, Result as ThreadResult};
 
 /// A thread guard.
@@ -32,22 +33,16 @@ impl<T> ThreadGuard<T> {
 
     /// Creates a new `ThreadGuard` with the specified pre-action and
     /// post-action.
-    pub fn with_actions<S, F, G>(
-        handle: JoinHandle<T>,
-        mut pre_action_data: S,
-        pre_action: F,
-        post_action: G,
-    ) -> Self
+    pub fn with_actions<U, F, G>(handle: JoinHandle<T>, pre_action: F, post_action: G) -> Self
     where
-        S: Send + 'static,
-        for<'a> F: FnOnce(&mut S, &JoinHandle<T>) + Send + 'a,
-        for<'a> G: FnOnce(ThreadResult<T>) + Send + 'a,
+        for<'a> F: FnOnce(&JoinHandle<T>) -> U + Send + 'a,
+        for<'a> G: FnOnce(U, ThreadResult<T>) + Send + 'a,
     {
         let action = Box::new(move |run_post_action, join_handle| {
-            pre_action(&mut pre_action_data, &join_handle);
+            let arg = pre_action(&join_handle);
             let result = join_handle.join();
             if run_post_action {
-                post_action(result);
+                post_action(arg, result);
 
                 // This is a bit ugly. Another possibility would be for `action`
                 // to return an `Option<ThreadResult<T>>` but then we will have
@@ -64,6 +59,7 @@ impl<T> ThreadGuard<T> {
     /// Joins the guarded thread.
     pub fn join(mut self) -> ThreadResult<T> {
         let (handle, action) = self.0.take().unwrap();
+        mem::forget(self);
 
         action(false, handle)
     }
