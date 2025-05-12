@@ -2,11 +2,10 @@
 #![warn(missing_docs, missing_debug_implementations, unreachable_pub)]
 #![forbid(unsafe_code)]
 
+use std::any::Any;
 use std::fmt;
+use std::mem;
 use std::thread::{JoinHandle, Result as ThreadResult};
-
-type PreAction<T, S> = Box<dyn FnOnce(&mut S, &JoinHandle<T>) + Send + 'static>;
-type PostAction<T> = Box<dyn FnOnce(ThreadResult<T>) + Send + 'static>;
 
 /// A thread guard.
 ///
@@ -16,79 +15,81 @@ type PostAction<T> = Box<dyn FnOnce(ThreadResult<T>) + Send + 'static>;
 /// before and after thread joining, respectively. The thread can also be
 /// explicitly joined using the `join` method. In this case, the pre-action is
 /// executed before the join, and the thread result is returned to the caller.
-pub struct ThreadGuard<T, S = ()> {
-    /// The thread handle.
-    handle: Option<JoinHandle<T>>,
-
-    /// Data used by the pre-action.
-    pre_action_data: S,
-
-    /// An action called before the thread join.
-    pre_action: Option<PreAction<T, S>>,
-
-    /// An action processing the thread result executed on drop.
-    post_action: Option<PostAction<T>>,
-}
+pub struct ThreadGuard<T>(
+    #[allow(clippy::type_complexity)]
+    Option<(
+        JoinHandle<T>,
+        Box<dyn FnOnce(bool, JoinHandle<T>) -> ThreadResult<T> + Send>,
+    )>,
+);
 
 impl<T> ThreadGuard<T> {
     /// Creates a new `ThreadGuard`.
     pub fn new(handle: JoinHandle<T>) -> Self {
-        Self {
-            handle: Some(handle),
-            pre_action_data: (),
-            pre_action: None,
-            post_action: None,
-        }
-    }
-}
+        let action =
+            Box::new(move |_run_post_action, join_handle: JoinHandle<T>| join_handle.join());
 
-impl<T, S> ThreadGuard<T, S> {
+        Self(Some((handle, action)))
+    }
+
+    /// Creates a new `ThreadGuard` with the specified pre-action.
+    pub fn with_pre_action<U, F>(handle: JoinHandle<T>, pre_action: F) -> Self
+    where
+        for<'a> F: FnOnce(&JoinHandle<T>) -> U + Send + 'a,
+    {
+        Self::with_actions(handle, pre_action, |_, _| {})
+    }
+
+    /// Creates a new `ThreadGuard` with the specified post-action.
+    pub fn with_post_action<F>(handle: JoinHandle<T>, post_action: F) -> Self
+    where
+        for<'a> F: FnOnce(ThreadResult<T>) + Send + 'a,
+    {
+        Self::with_actions(handle, |_| {}, |_, result| post_action(result))
+    }
+
     /// Creates a new `ThreadGuard` with the specified pre-action and
     /// post-action.
-    pub fn with_actions<F, G>(
-        handle: JoinHandle<T>,
-        pre_action_data: S,
-        pre_action: F,
-        post_action: G,
-    ) -> Self
+    pub fn with_actions<U, F, G>(handle: JoinHandle<T>, pre_action: F, post_action: G) -> Self
     where
-        for<'a> F: FnOnce(&mut S, &JoinHandle<T>) + Send + 'a,
-        for<'a> G: FnOnce(ThreadResult<T>) + Send + 'a,
+        for<'a> F: FnOnce(&JoinHandle<T>) -> U + Send + 'a,
+        for<'a> G: FnOnce(U, ThreadResult<T>) + Send + 'a,
     {
-        Self {
-            handle: Some(handle),
-            pre_action_data,
-            pre_action: Some(Box::new(pre_action)),
-            post_action: Some(Box::new(post_action)),
-        }
+        let action = Box::new(move |run_post_action, join_handle| {
+            let arg = pre_action(&join_handle);
+            let result = join_handle.join();
+            if run_post_action {
+                post_action(arg, result);
+
+                // This is a bit ugly. Another possibility would be for `action`
+                // to return an `Option<ThreadResult<T>>` but then we will have
+                // yet another infallible `unwrap`.
+                return Err(Box::new(()) as Box<dyn Any + Send>);
+            }
+
+            result
+        });
+
+        Self(Some((handle, action)))
     }
 
     /// Joins the guarded thread.
     pub fn join(mut self) -> ThreadResult<T> {
-        // Shall never be `None`.
-        let handle = self.handle.take().unwrap();
-        if let Some(action) = self.pre_action.take() {
-            action(&mut self.pre_action_data, &handle);
-        }
-        handle.join()
+        let (handle, action) = self.0.take().unwrap();
+        mem::forget(self);
+
+        action(false, handle)
     }
 }
 
-impl<T, S> Drop for ThreadGuard<T, S> {
+impl<T> Drop for ThreadGuard<T> {
     fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            if let Some(action) = self.pre_action.take() {
-                action(&mut self.pre_action_data, &handle);
-            }
-            let result = handle.join();
-            if let Some(action) = self.post_action.take() {
-                action(result);
-            }
-        }
+        let (handle, action) = self.0.take().unwrap();
+        let _ = action(true, handle);
     }
 }
 
-impl<T, S> fmt::Debug for ThreadGuard<T, S> {
+impl<T> fmt::Debug for ThreadGuard<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("ThreadGuard").finish_non_exhaustive()
     }

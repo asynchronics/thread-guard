@@ -29,12 +29,10 @@ The post-action can be used to handle the thread result:
 use std::thread;
 use thread_guard::ThreadGuard;
 
-let guard = ThreadGuard::with_actions(
+let guard = ThreadGuard::with_post_action(
     thread::spawn(|| {
         1
     }),
-    (),
-    |_, _| {},
     |r| {println!("The thread exited with the result {:?}", r)});
 ```
 
@@ -46,14 +44,12 @@ use std::thread;
 use thread_guard::ThreadGuard;
 
 let (tx, rx) = channel();
-let guard = ThreadGuard::with_actions(
+let guard = ThreadGuard::with_pre_action(
     thread::spawn(move || -> Result<(), RecvError>{
         rx.recv()?;
         Ok(())
     }),
-    (),
-    move |_, _| {let _ = tx.send(());},
-    |_| {});
+    move |_| {let _ = tx.send(());});
 ```
 
 Finally, a pre-action may need some data that outlives the appropriate

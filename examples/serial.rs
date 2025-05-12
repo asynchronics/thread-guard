@@ -27,7 +27,7 @@ const SERIAL: Token = Token(0);
 const WAKE: Token = Token(1);
 
 /// Returns a thread guard for serial port echoing thread.
-fn port_a() -> Result<ThreadGuard<Result<(), Error>, Waker>, Error> {
+fn port_a() -> Result<ThreadGuard<Result<(), Error>>, Error> {
     let mut poll = Poll::new()?;
     let mut port = mio_serial::new(PORT_PATH_A, 0).open_native_async()?;
     let registry = poll.registry();
@@ -58,7 +58,7 @@ fn port_a() -> Result<ThreadGuard<Result<(), Error>, Waker>, Error> {
                                     if port.write(&buf[..len])? != len {
                                         return Err(Error::new(
                                             ErrorKind::Other,
-                                            "Write did not fully succed.",
+                                            "Write did not fully succeed.",
                                         ));
                                     };
                                 }
@@ -73,14 +73,15 @@ fn port_a() -> Result<ThreadGuard<Result<(), Error>, Waker>, Error> {
             }
             Ok(())
         }),
-        waker,
-        |waker, _| {
+        move |_| {
             // Make thread exit. That's important to make sure that the waker is
             // alive until wake signal is delivered, that's why it is kept in
             // the guard, not in the closure.
             let _ = waker.wake();
+
+            waker
         },
-        |r| {
+        |_waker, r| {
             println!("Port A thread exited with the result {:?}.", r);
         },
     );
