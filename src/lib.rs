@@ -31,6 +31,22 @@ impl<T> ThreadGuard<T> {
         Self(Some((handle, action)))
     }
 
+    /// Creates a new `ThreadGuard` with the specified pre-action.
+    pub fn with_pre_action<U, F>(handle: JoinHandle<T>, pre_action: F) -> Self
+    where
+        for<'a> F: FnOnce(&JoinHandle<T>) -> U + Send + 'a,
+    {
+        Self::with_actions(handle, pre_action, |_, _| {})
+    }
+
+    /// Creates a new `ThreadGuard` with the specified post-action.
+    pub fn with_post_action<F>(handle: JoinHandle<T>, post_action: F) -> Self
+    where
+        for<'a> F: FnOnce(ThreadResult<T>) + Send + 'a,
+    {
+        Self::with_actions(handle, |_| {}, |_, result| post_action(result))
+    }
+
     /// Creates a new `ThreadGuard` with the specified pre-action and
     /// post-action.
     pub fn with_actions<U, F, G>(handle: JoinHandle<T>, pre_action: F, post_action: G) -> Self
