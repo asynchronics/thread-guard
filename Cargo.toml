@@ -6,6 +6,8 @@ edition = "2024"
 resolver = "3"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/asynchronics/thread-guard"
+readme = "README.md"
+homepage = "https://github.com/asynchronics/thread-guard"
 description = """
 A simple thread guard.
 """
