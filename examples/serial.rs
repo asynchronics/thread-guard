@@ -75,8 +75,8 @@ fn port_a() -> Result<ThreadGuard<Result<(), Error>>, Error> {
         }),
         move |_| {
             // Make thread exit. That's important to make sure that the waker is
-            // alive until wake signal is delivered, that's why it is kept in
-            // the guard, not in the closure.
+            // alive until wake signal is delivered, that's why it is returned
+            // from the closure.
             let _ = waker.wake();
 
             waker
